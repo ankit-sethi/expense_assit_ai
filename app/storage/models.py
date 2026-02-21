@@ -1,0 +1,31 @@
+from sqlalchemy import Column, String, Numeric, TIMESTAMP, Text
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+import uuid
+from pgvector.sqlalchemy import Vector
+from storage.db import Base
+
+
+class Expense(Base):
+
+    __tablename__ = "expenses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    txn_date = Column(TIMESTAMP, nullable=False)
+
+    amount = Column(Numeric(12,2), nullable=False)
+    currency = Column(String, default="INR")
+
+    merchant = Column(Text)
+    category = Column(Text)
+
+    payment_method = Column(Text)
+    bank_name = Column(Text)
+
+    source = Column(Text)
+    raw_text = Column(Text)
+    
+    embedding = Column(Vector(1536))
+
+    created_at = Column(TIMESTAMP, server_default=func.now())
