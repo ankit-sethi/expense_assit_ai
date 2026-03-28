@@ -1,4 +1,5 @@
 from ingestion.gmail_client import GmailClient
+from ingestion.gmail_client import is_transaction_email
 from parsing.transaction_parser import TransactionParser
 from normalization.categorizer import Categorizer
 from storage.repository import ExpenseRepository
@@ -14,16 +15,22 @@ def run_pipeline():
     messages = gmail.fetch_messages()
 
     for raw in messages:
+         if not is_transaction_email(raw["raw_text"]):
+            print("❌ Rejected by transaction filter\n")
+            continue 
 
-        parsed = parser.parse(raw)
-        if not parsed:
-            continue
+         parsed = parser(raw["raw_text"])
 
-        normalized = norm.normalize(parsed)
+         if not parsed:
+            print("❌ Failed parsing\n")
+         else:
+            print("🎯 Parsed Result:")
 
-        emb_text = build_embedding_text(normalized)
-        normalized["embedding"] = create_embedding(emb_text)
+         normalized = norm.normalize(parsed)
 
-        repo.save(normalized)
+         emb_text = build_embedding_text(normalized)
+         normalized["embedding"] = create_embedding(emb_text)
+
+         repo.save(normalized)
         
-        print("Saved:", parsed["merchant"], parsed["amount"])
+         print("Saved:", parsed["merchant"], parsed["amount"])

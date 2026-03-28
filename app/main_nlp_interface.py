@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from ai.sql_agent import generate_sql
+from expense_assit_ai.app.ai.sql_agent import generate_sql
 from expense_assit_ai.app.storage.db import run_sql
 from expense_assit_ai.app.ai.sql_validator import validate_sql
 

@@ -1,8 +1,24 @@
 import base64
+from email.mime import text
 from bs4 import BeautifulSoup
 
 from ingestion.gmail_auth import get_gmail_service
 
+def is_transaction_email(self, text: str):
+        text = text.lower()
+        strong_keywords = [
+            "debited",
+            "credited",
+            "upi txn",
+            "rs.",
+            "inr",
+            "a/c",
+            "account",
+        ]
+        match_count = sum(1 for k in strong_keywords if k in text)
+
+    # require at least 2 strong signals
+        return match_count >= 2    
 
 class GmailClient:
 
@@ -11,7 +27,12 @@ class GmailClient:
 
     def fetch_messages(self, max_results=100):
 
-        query = "newer_than:30d ('debited OR spent OR transaction OR UPI OR INR ' 'from:hdfcbank.com OR from:icicibank.com OR from:sbi.co.in OR from:axisbank.com')"
+        query = (
+    "category:primary "
+    "newer_than:30d "
+    "(debited OR spent OR transaction OR UPI OR INR) "
+    "(from:alerts@hdfcbank.bank.in OR from:cbsalerts@sbi.co.in OR from:alerts@axis.bank.in)"
+                )
 
         try:
             results = self.service.users().messages().list(
@@ -54,16 +75,17 @@ class GmailClient:
                     if data:
                         body += base64.urlsafe_b64decode(data).decode(errors="ignore")
 
-                # Clean HTML
+                #Clean HTML
                 if "<html" in body.lower():
                     body = BeautifulSoup(body, "html.parser").get_text(" ")
+                    if self.is_transaction_email(body):
 
-                output.append({
-                    "source": "gmail",
-                    "message_id": msg["id"],
-                    "timestamp": int(full["internalDate"]),
-                    "raw_text": body
-                })
+                        output.append({
+                            "source": "gmail",
+                            "message_id": msg["id"],
+                            "timestamp": int(full["internalDate"]),
+                            "raw_text": body
+                        })
 
             print(f"[GMAIL] Imported {len(output)} message(s) successfully")
 

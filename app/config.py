@@ -12,3 +12,4 @@ postgresql://{os.getenv('DB_USER')}:
 """.replace("\n", "")
 
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
