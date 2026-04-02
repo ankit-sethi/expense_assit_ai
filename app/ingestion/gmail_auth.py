@@ -5,29 +5,31 @@ from google.auth.transport.requests import Request
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_CREDENTIALS_PATH = os.path.join(_APP_DIR, 'credentials.json')
+_TOKEN_PATH = os.path.join(_APP_DIR, 'token.pkl')
+
 
 def get_gmail_service():
 
     creds = None
 
     try:
-        # Load saved token if exists
-        if os.path.exists('token.pkl'):
-            with open('token.pkl', 'rb') as f:
+        if os.path.exists(_TOKEN_PATH):
+            with open(_TOKEN_PATH, 'rb') as f:
                 creds = pickle.load(f)
 
-        # If no valid creds → authenticate
         if not creds or not creds.valid:
 
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    'credentials.json', SCOPES
+                    _CREDENTIALS_PATH, SCOPES
                 )
                 creds = flow.run_local_server(port=0)
 
-            with open('token.pkl', 'wb') as f:
+            with open(_TOKEN_PATH, 'wb') as f:
                 pickle.dump(creds, f)
 
         service = build('gmail', 'v1', credentials=creds)

@@ -9,3 +9,5 @@ googleapiclient.discovery
 google_auth_oauthlib.flow
 bs4
 python-dateutil
+pdfplumber
+pikepdf

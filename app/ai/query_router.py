@@ -5,7 +5,11 @@ from ai.semantic_search import search_similar
 NUMERIC_KEYWORDS = [
     "how much", "total", "sum", "spent",
     "count", "average", "monthly", "last month",
-    "this year"
+    "this year", "more than", "less than", "greater than",
+    "above", "below", "over", "under", "between",
+    "highest", "lowest", "biggest", "largest", "maximum", "minimum",
+    "last week", "this month", "yesterday", "today",
+    "transactions", "show me", "list", "find",
 ]
 
 
