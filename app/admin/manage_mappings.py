@@ -16,11 +16,22 @@ from sqlalchemy import func
 # Default CSV path: project_root/merchant_mappings.csv
 _DEFAULT_CSV = Path(__file__).parent.parent.parent / "merchant_mappings.csv"
 
+# Tables reviewed/cleaned together throughout this module
+TABLE_MODELS = [("expenses", Expense), ("credits", Credit)]
+
+# Words that are never merchant names — used when extracting pattern candidates from raw text
+_NOISE = {
+    "debit", "credit", "bank", "inr", "upi", "neft", "imps", "rtgs",
+    "amount", "transaction", "account", "card", "your", "has", "been",
+    "used", "for", "the", "and", "via", "ref", "no", "date", "time",
+    "balance", "available", "total", "rupees", "rs", "statement",
+}
+
 
 def cmd_quality():
     db = SessionLocal()
     try:
-        for label, model in [("expenses", Expense), ("credits", Credit)]:
+        for label, model in TABLE_MODELS:
             total = db.query(func.count(model.id)).scalar()
             null_merchant  = db.query(func.count(model.id)).filter(
                 (model.merchant == None) | (model.merchant == "")
@@ -167,19 +178,14 @@ def cmd_review(table: str = "both", issue: str = "both"):
         rows = []
         for label, model in sources:
             q = db.query(model)
+            merchant_filter  = (model.merchant == None) | (model.merchant == "") | (model.merchant == "Unknown")
+            category_filter  = (model.category == "Other") | (model.category == None)
             if issue == "merchant":
-                q = q.filter(
-                    (model.merchant == None) | (model.merchant == "") | (model.merchant == "Unknown")
-                )
+                q = q.filter(merchant_filter)
             elif issue == "category":
-                q = q.filter(
-                    (model.category == "Other") | (model.category == None)
-                )
-            else:  # both
-                q = q.filter(
-                    (model.merchant == None) | (model.merchant == "") | (model.merchant == "Unknown") |
-                    (model.category == "Other") | (model.category == None)
-                )
+                q = q.filter(category_filter)
+            else:
+                q = q.filter(merchant_filter | category_filter)
             for row in q.order_by(model.txn_date.desc()).all():
                 rows.append((label, row))
     finally:
@@ -233,13 +239,6 @@ def _extract_pattern_candidates(raw_text: str) -> list[str]:
     Pull candidate merchant patterns from a raw email or PDF transaction line.
     Returns up to 5 candidates, best first.
     """
-    # Noise words that are not merchant names
-    _NOISE = {
-        "debit", "credit", "bank", "inr", "upi", "neft", "imps", "rtgs",
-        "amount", "transaction", "account", "card", "your", "has", "been",
-        "used", "for", "the", "and", "via", "ref", "no", "date", "time",
-        "balance", "available", "total", "rupees", "rs", "statement",
-    }
     candidates = []
     seen = set()
 
@@ -379,7 +378,7 @@ def cmd_clean_existing():
         nulled_count  = 0
         unchanged     = 0
 
-        for label, model in [("expenses", Expense), ("credits", Credit)]:
+        for label, model in TABLE_MODELS:
             rows = db.query(model).filter(model.merchant != None).all()
             for row in rows:
                 original = row.merchant or ""

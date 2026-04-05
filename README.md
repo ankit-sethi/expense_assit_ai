@@ -144,6 +144,12 @@ See **INSTRUCTIONS.md** for full setup steps.
 - `review` command: interactive loop showing raw_text for unknown/uncategorised rows; inline add derives pattern from raw_text automatically
 - Telegram: `/quality`, `/review`, `/listmaps`, `/applymap`, `/addmap` (guided 4-step conversation)
 
+**Code Cleanup**
+- `storage/db.py` — added `get_db()` context manager; all repository methods now use `with get_db()` instead of manual `try/finally db.close()` boilerplate
+- `normalization/categorizer.py` — replaced `category == "Other"` magic-string sentinel with a `matched` boolean flag
+- `admin/manage_mappings.py` — `_NOISE` and `TABLE_MODELS` extracted to module-level constants; `cmd_review` filter logic de-duplicated
+- `pipelines/pdf_pipeline.py` — embedding call style aligned with `expense_pipeline.py`
+
 ### 2026-04-04
 
 **Inbox Hot-Folder (auto-import)**

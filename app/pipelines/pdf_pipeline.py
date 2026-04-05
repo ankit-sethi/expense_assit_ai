@@ -32,7 +32,8 @@ def run_pdf_pipeline(pdf_path: str, password: str | None = None) -> dict:
                 continue
 
             normalized = norm.normalize(row, db_mappings=db_mappings)
-            normalized["embedding"] = create_embedding(build_embedding_text(normalized))
+            emb_text = build_embedding_text(normalized)
+            normalized["embedding"] = create_embedding(emb_text)
             repo.save(normalized)
 
             if txn_type == "debit":
