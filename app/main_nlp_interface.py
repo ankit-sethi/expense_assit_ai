@@ -1,9 +1,9 @@
 from fastapi import FastAPI, HTTPException
-from expense_assit_ai.app.ai.sql_agent import generate_sql
-from expense_assit_ai.app.storage.db import run_sql
-from expense_assit_ai.app.ai.sql_validator import validate_sql
+from ai.sql_agent import generate_sql, run_sql
+from ai.sql_validator import validate_sql
 
 app = FastAPI()
+
 
 @app.get("/query")
 def query_expenses(q: str):

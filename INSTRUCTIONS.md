@@ -200,7 +200,26 @@ Enter natural language queries at the prompt:
 
 ---
 
-## Step 10 — Start the Telegram bot
+## Step 10 — Auto-import via Inbox Folder
+
+Drop PDF bank statements into the `inbox/` folder and the system imports them automatically.
+
+1. Start the watcher:
+   ```bash
+   cd expense_assit_ai
+   python app/watcher.py
+   ```
+2. Drop any bank statement PDF into `inbox/`.
+3. The watcher detects it, runs the PDF pipeline, and moves it to `inbox/processed/`.
+4. For password-protected PDFs, place a sidecar file alongside the PDF:
+   - PDF: `hdfc_statement.pdf`
+   - Password file: `hdfc_statement.pdf.password` (plain text, just the password)
+5. If processing fails, the file moves to `inbox/failed/` — check the watcher terminal for the error.
+6. After import, click **Refresh** in Power BI Desktop to see the new data.
+
+---
+
+## Step 11 — Start the Telegram bot (alternative to inbox folder)
 
 1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
 2. Add `TELEGRAM_BOT_TOKEN=...` to your `.env`.
@@ -220,7 +239,7 @@ python telegram_bot.py
 
 ---
 
-## Step 11 — Start the FastAPI server (optional)
+## Step 12 — Start the FastAPI server (optional)
 
 ```bash
 cd app
@@ -243,6 +262,54 @@ API available at `http://localhost:8000`.
 | `python test_ingestion.py` | Test Gmail fetch without saving to DB |
 | `python test_pipeline.py` | End-to-end pipeline dry run |
 | `python test_query_CLI.py` | Test semantic search and SQL agent queries |
+
+---
+
+## Step 13 — Connect Power BI Desktop (Dashboard)
+
+### Prerequisites
+
+1. **Power BI Desktop** — free download from `microsoft.com/en-us/power-bi/downloads`
+2. **Npgsql PostgreSQL connector** — required for Power BI to talk to PostgreSQL:
+   - Download the latest `Npgsql-X.X.X.msi` from `github.com/npgsql/npgsql/releases`
+   - Run the installer, restart Power BI Desktop after
+
+### Apply the dashboard views (one-time)
+
+```bash
+docker exec -i expense_postgres psql -U expense_user -d expenses_db < db/views.sql
+```
+
+Verify:
+```bash
+docker exec -it expense_postgres psql -U expense_user -d expenses_db -c "\dv"
+```
+Expected: 4 views listed — `v_monthly_spend`, `v_category_spend`, `v_top_merchants`, `v_monthly_income_vs_expense`.
+
+### Connect Power BI Desktop
+
+1. Open Power BI Desktop → **Home** → **Get Data** → **PostgreSQL database**
+2. Enter:
+   - Server: `localhost`
+   - Database: `expenses_db`
+3. Select **Import** mode → click **OK**
+4. In the Navigator, tick all 4 views:
+   - `v_monthly_spend`
+   - `v_category_spend`
+   - `v_top_merchants`
+   - `v_monthly_income_vs_expense`
+5. Click **Load**
+
+### Build the dashboard pages
+
+| Page | Chart type | X / Legend | Y / Values |
+|------|-----------|------------|------------|
+| Monthly Trend | Clustered bar chart | `month` | `total_spent` |
+| By Category | Donut chart | `category` | `total_spent` |
+| Top Merchants | Bar chart (horizontal) | `merchant` | `total_spent` |
+| Income vs Expenses | Clustered bar chart | `month` | `expenses` + `income` |
+
+> **Refresh data:** Click **Home → Refresh** in Power BI Desktop whenever new transactions have been ingested.
 
 ---
 

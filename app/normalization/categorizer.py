@@ -50,15 +50,28 @@ _CATEGORY_MAP_LOWER = {k.lower(): v for k, v in CATEGORY_MAP.items()}
 
 class Categorizer:
 
-    def normalize(self, txn: dict) -> dict:
-        merchant_lower = txn.get("merchant", "").lower()
-        category, sub_category = "Other", ""
+    def normalize(self, txn: dict, db_mappings: list | None = None) -> dict:
+        merchant_lower = (txn.get("merchant") or "").lower()
+        category, sub_category, clean_name = "Other", "", None
 
-        for key, (cat, sub) in _CATEGORY_MAP_LOWER.items():
-            if key in merchant_lower:
-                category, sub_category = cat, sub
-                break
+        # 1. DB mappings first (sorted by priority DESC by caller)
+        if db_mappings:
+            for m in db_mappings:
+                if m.raw_pattern.lower() in merchant_lower:
+                    category    = m.category
+                    sub_category = m.sub_category
+                    clean_name  = m.clean_name
+                    break
 
-        txn["category"] = category
+        # 2. Fall back to hardcoded map
+        if category == "Other":
+            for key, (cat, sub) in _CATEGORY_MAP_LOWER.items():
+                if key in merchant_lower:
+                    category, sub_category = cat, sub
+                    break
+
+        txn["category"]     = category
         txn["sub_category"] = sub_category
+        if clean_name:
+            txn["merchant"] = clean_name   # overwrite with canonical name from DB mapping
         return txn

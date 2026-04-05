@@ -47,3 +47,6 @@ CREATE TABLE credits (
 CREATE INDEX idx_credits_date     ON credits(txn_date);
 CREATE INDEX idx_credits_merchant ON credits(merchant);
 CREATE INDEX idx_credits_category ON credits(category);
+
+-- Dashboard views (Power BI)
+\i /docker-entrypoint-initdb.d/views.sql

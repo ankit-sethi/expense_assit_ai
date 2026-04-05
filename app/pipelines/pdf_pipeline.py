@@ -1,17 +1,18 @@
 import logging
 from ingestion.pdf_parser import PDFParser
 from normalization.categorizer import Categorizer
-from storage.repository import ExpenseRepository, CreditRepository
+from storage.repository import ExpenseRepository, CreditRepository, MappingRepository
 from ai.embeddings import build_embedding_text, create_embedding
 
 logger = logging.getLogger(__name__)
 
 
 def run_pdf_pipeline(pdf_path: str, password: str | None = None) -> dict:
-    parser    = PDFParser()
-    norm      = Categorizer()
-    exp_repo  = ExpenseRepository()
-    cred_repo = CreditRepository()
+    parser      = PDFParser()
+    norm        = Categorizer()
+    exp_repo    = ExpenseRepository()
+    cred_repo   = CreditRepository()
+    db_mappings = MappingRepository().get_all_sorted()
 
     rows = parser.parse(pdf_path, password=password)
     if not rows:
@@ -30,7 +31,7 @@ def run_pdf_pipeline(pdf_path: str, password: str | None = None) -> dict:
                 skipped += 1
                 continue
 
-            normalized = norm.normalize(row)
+            normalized = norm.normalize(row, db_mappings=db_mappings)
             normalized["embedding"] = create_embedding(build_embedding_text(normalized))
             repo.save(normalized)
 

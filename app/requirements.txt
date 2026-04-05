@@ -4,10 +4,13 @@ psycopg2-binary
 sqlalchemy
 python-dotenv
 openai
-google.auth.transport.requests
-googleapiclient.discovery
-google_auth_oauthlib.flow
+google-auth
+google-api-python-client
+google-auth-oauthlib
 bs4
 python-dateutil
 pdfplumber
 pikepdf
+pgvector
+python-telegram-bot
+watchdog

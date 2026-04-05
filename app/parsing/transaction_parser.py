@@ -1,7 +1,7 @@
 import re
 import logging
 from datetime import datetime
-from parsing.parse_utils import MAX_AMOUNT, parse_date
+from parsing.parse_utils import MAX_AMOUNT, parse_date, clean_merchant_name, clean_vpa
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +24,6 @@ MERCHANT_PATTERN = re.compile(
 
 VPA_PATTERN = re.compile(r'VPA\s+([A-Za-z0-9.\-_]+@[A-Za-z0-9.\-_]+)', re.IGNORECASE)
 
-_MERCHANT_STOPWORDS = {"the", "a", "an", "your", "our", "this", "that", "us", "you", "we"}
-MAX_MERCHANT_LEN = 50
-
-
 def _parse_txn_date(text: str, fallback_ts: int) -> datetime:
     for pattern in DATE_PATTERNS:
         match = pattern.search(text)
@@ -36,15 +32,6 @@ def _parse_txn_date(text: str, fallback_ts: int) -> datetime:
             if result:
                 return result
     return datetime.fromtimestamp(fallback_ts / 1000)
-
-
-def _clean_merchant(raw: str) -> str | None:
-    merchant = raw.strip()[:MAX_MERCHANT_LEN].strip()
-    if len(merchant) < 3:
-        return None
-    if merchant.lower() in _MERCHANT_STOPWORDS:
-        return None
-    return merchant
 
 
 class TransactionParser:
@@ -74,11 +61,9 @@ class TransactionParser:
             return None
 
         if vpa_match:
-            merchant = vpa_match.group(1)
+            merchant = clean_vpa(vpa_match.group(1))
         elif merchant_match:
-            merchant = _clean_merchant(merchant_match.group(1))
-            if not merchant:
-                merchant = "Unknown"
+            merchant = clean_merchant_name(merchant_match.group(1)) or "Unknown"
         else:
             merchant = "Unknown"
 

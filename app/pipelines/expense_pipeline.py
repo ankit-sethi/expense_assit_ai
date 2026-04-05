@@ -2,7 +2,7 @@ import logging
 from ingestion.gmail_client import GmailClient
 from parsing.transaction_parser import TransactionParser
 from normalization.categorizer import Categorizer
-from storage.repository import ExpenseRepository
+from storage.repository import ExpenseRepository, MappingRepository
 from ai.embeddings import build_embedding_text, create_embedding
 
 logger = logging.getLogger(__name__)
@@ -13,6 +13,7 @@ def run_pipeline():
     parser = TransactionParser()
     norm = Categorizer()
     repo = ExpenseRepository()
+    db_mappings = MappingRepository().get_all_sorted()
 
     messages = gmail.fetch_messages()
     saved, skipped, failed = 0, 0, 0
@@ -32,7 +33,7 @@ def run_pipeline():
                 failed += 1
                 continue
 
-            normalized = norm.normalize(parsed)
+            normalized = norm.normalize(parsed, db_mappings=db_mappings)
 
             emb_text = build_embedding_text(normalized)
             normalized["embedding"] = create_embedding(emb_text)

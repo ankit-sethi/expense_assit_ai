@@ -1,0 +1,108 @@
+# Merchant mapping file — edit this file, then run:,,,
+#   python app/admin/manage_mappings.py import,,,,
+#,,,,
+# Columns:,,,,
+#   raw_pattern  — substring matched case-insensitively against the raw merchant field,,,,
+#   clean_name   — canonical name written into the transaction,,,,
+#   category     — top-level category,,,,
+#   sub_category — optional sub-category (leave blank if not needed),,,,
+#   priority     — higher number = checked first (use 10+ to override built-in defaults),,,,
+#,,,,
+# Rules:,,,,
+#   - Lines starting with # are ignored,,,,
+"#   - raw_pattern is matched as a substring: ""swiggy"" matches ""SWIGGY FOOD DELIVERY LTD""",,,,
+#   - More specific patterns should have higher priority than general ones,,,,
+"#     e.g. ""swiggy instamart"" (priority 10) beats ""swiggy"" (priority 0)",,,,
+#   - Re-running import is safe — existing rows are updated, not duplicated,,,
+#,,,,
+raw_pattern,clean_name,category,sub_category,priority
+# --- Food & Grocery ---,,,,
+swiggy instamart,Swiggy Instamart,Food,Grocery Delivery,10
+swiggy,Swiggy,Food,Food Delivery,0
+zomato,Zomato,Food,Food Delivery,0
+blinkit,Blinkit,Food,Grocery Delivery,0
+bigbasket,BigBasket,Food,Grocery Delivery,0
+mapro,Mapro,Food,Groceries,0
+hyper store,Hyper Store,Food,Groceries,0
+grateful bread hospitalbangalore,Grateful Bread,Food,Restaurant,0
+# --- Shopping ---,,,,
+amazon,Amazon,Shopping,Online Shopping,0
+flipkart payments,Flipkart,Shopping,Online Shopping,10
+flipkart,Flipkart,Shopping,Online Shopping,0
+myntra,Myntra,Shopping,Fashion,0
+meesho,Meesho,Shopping,Online Shopping,0
+nykaa,Nykaa,Shopping,Beauty,0
+ajio,Ajio,Shopping,Fashion,0
+lifestyle international,Lifestyle,Shopping,Fashion,10
+life style international,Lifestyle,Shopping,Fashion,10
+life style internationa,Lifestyle,Shopping,Fashion,10
+pvh arvind,Tommy Hilfiger,Shopping,Fashion,0
+house of rare,The House of Rare,Shopping,Fashion,0
+# --- Baby Products ---,,,,
+firstcry,FirstCry,Shopping,Baby Products,0
+fss4first,FirstCry,Shopping,Baby Products,0
+# --- Transport ---,,,,
+uber eats,Uber Eats,Food,Food Delivery,10
+uber,Uber,Transport,Ride Hailing,0
+ola,Ola,Transport,Ride Hailing,0
+rapido,Rapido,Transport,Ride Hailing,0
+irctc,IRCTC,Transport,Train,0
+indigo,IndiGo,Transport,Flight,0
+redbus,RedBus,Transport,Bus,0
+# --- Entertainment ---,,,,
+netflix,Netflix,Entertainment,Streaming,0
+spotify,Spotify,Entertainment,Streaming,0
+hotstar,Hotstar,Entertainment,Streaming,0
+apple music,Apple Music,Entertainment,Streaming,0
+youtube premium,YouTube Premium,Entertainment,Streaming,0
+bookmyshow,BookMyShow,Entertainment,Events,0
+# --- Subscriptions ---,,,,
+openai,OpenAI ChatGPT,Subscription,AI,0
+chatgpt,OpenAI ChatGPT,Subscription,AI,10
+# --- Bills & Telecom ---,,,,
+airtel,Airtel,Bills,Telecom,0
+jio,Jio,Bills,Telecom,0
+vi mobile,Vi,Bills,Telecom,0
+bescom,BESCOM,Bills,Electricity,0
+tata power,Tata Power,Bills,Electricity,0
+# --- Bills & Bank ---,,,,
+hdfc bank,HDFC,Bills,Bank,0
+sbi,SBI,Bills,Bank,0
+axis bank,Axis Bank,Bills,Bank,0
+icici,ICICI,Bills,Bank,0
+kotak,Kotak,Bills,Bank,0
+idbi,IDBI,Bills,Bank,0
+# --- Finance / UPI ---,,,,
+upi transfer,UPI Transfer,Finance,UPI,0
+phonepe,PhonePe,Finance,UPI,0
+gpay-utility,Google Pay,Finance,UPI,10
+gpay,Google Pay,Finance,UPI,0
+paytm,Paytm,Finance,Wallet,0
+xpressbees,Xpressbees,Finance,Logistics,0
+# --- Health ---,,,,
+apollo pharmacy,Apollo Pharmacy,Health,Pharmacy,10
+apollo,Apollo,Health,Pharmacy,0
+pharmeasy,PharmEasy,Health,Pharmacy,0
+1mg,1mg,Health,Pharmacy,0
+practo,Practo,Health,Consultation,0
+# --- Personal Care / Grooming ---,,,,
+enrich,Enrich Salon,Personal Care,Grooming,0
+master crop,Master Crop,Personal Care,Grooming,0
+# --- Travel ---,,,,
+makemytrip india,MakeMyTrip,Travel,Booking,10
+makemytrip,MakeMyTrip,Travel,Booking,0
+goibibo,Goibibo,Travel,Booking,0
+# --- Amex payment gateway patterns ---,,,,
+razorpay*zomato,Zomato,Food,Food Delivery,10
+paytm*jubilant,Dominos,Food,Food Delivery,10
+payu*blink,Blinkit,Food,Grocery Delivery,0
+rbl*barkaati,Barkaati Traders,Shopping,General,0
+# --- Home & Lifestyle ---,,,,
+ikea,IKEA,Shopping,Home & Furniture,0
+marks and spencer,Marks & Spencer,Shopping,Fashion,0
+the body shop,The Body Shop,Shopping,Beauty,0
+# --- Insurance ---,,,,
+insurance through amex,AMEX Insurance,Bills,Insurance,0
+term life ins thru amex,AMEX Insurance,Bills,Insurance,0
+# --- International / Tech ---,,,,
+anthropic,Anthropic Claude,Subscription,AI,0

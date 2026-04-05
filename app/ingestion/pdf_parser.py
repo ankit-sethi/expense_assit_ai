@@ -2,12 +2,13 @@ import io
 import re
 import hashlib
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import pikepdf
 import pdfplumber
 
-from parsing.parse_utils import MAX_AMOUNT, parse_amount, parse_date
+from parsing.parse_utils import MAX_AMOUNT, parse_amount, parse_date, clean_merchant_name
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,43 @@ _HDFC_CC_ROW = re.compile(
 )
 
 
+# ---------------------------------------------------------------------------
+# Amex credit card statement (text-based, no tables)
+# Format: "February 13   AMAZON   Mumbai   640.00"
+# ---------------------------------------------------------------------------
+
+_AMEX_TXN_RE = re.compile(
+    r'^(January|February|March|April|May|June|July|August|'
+    r'September|October|November|December)\s+(\d{1,2})\s+'
+    r'(.+)\s+'
+    r'([0-9,]+\.[0-9]{2})\s*$',
+    re.IGNORECASE,
+)
+
+_AMEX_MONTH_MAP = {
+    'january': 1, 'february': 2, 'march': 3, 'april': 4,
+    'may': 5,     'june': 6,     'july': 7,  'august': 8,
+    'september': 9, 'october': 10, 'november': 11, 'december': 12,
+}
+
+# Lines that are section headers, summaries, or fee entries — not real transactions
+_AMEX_SKIP_RE = re.compile(
+    r'FINANCE CHARGES|GST/IGST|INSTALLMENT PRINCIPAL AMOUNT|'
+    r'New domestic transactions|New overseas transactions|'
+    r'Total of Installments|TOTAL OVERSEAS SPEND|'
+    r'Card Number XXXX|UNITED STATES DOLLAR|'
+    r'Foreign Spending|Amount Rs|^Details\b|'
+    r'Page \d+ of \d+|americanexpress\.co\.in|Statement of Account|'
+    r'Membership Number|Prepared for|Credit Summary|Credit Limit|'
+    r'Installment Plan|CardMember|Payment Information|Payment Methods|'
+    r'NEFT details|IFSC Code|Drop Box|Mailing Preference|'
+    r'Foreign Exchange Currency|Permanent Account Number|GSTIN|'
+    r'Current Rates of Interest|Opening Balance|Closing Balance|'
+    r'Min Payment Due|Minimum Payment',
+    re.IGNORECASE,
+)
+
+
 def _redact_pii(text: str) -> str:
     for pattern, replacement in _PII_PATTERNS:
         text = pattern.sub(replacement, text)
@@ -65,8 +103,15 @@ class PDFParser:
 
     def parse(self, pdf_path: str, password: str | None = None) -> list[dict]:
         pdf_bytes = self._decrypt(pdf_path, password)
-        tables    = self._extract_tables(pdf_bytes)
         filename  = Path(pdf_path).stem
+
+        # Check Amex first — it uses plain text, not PDF tables
+        full_text = self._extract_full_text(pdf_bytes)
+        if self._is_amex(full_text):
+            logger.info("[PDF] Detected format: AMEX Credit Card")
+            return self._parse_amex(full_text, filename)
+
+        tables = self._extract_tables(pdf_bytes)
 
         if not tables:
             logger.warning(f"[PDF] No tables found in {pdf_path}")
@@ -136,7 +181,7 @@ class PDFParser:
                 rows.append({
                     "txn_date":       txn_date,
                     "amount":         amount,
-                    "merchant":       desc.strip()[:100],
+                    "merchant":       clean_merchant_name(desc) or desc.strip()[:50],
                     "payment_method": "CREDIT CARD",
                     "bank_name":      "HDFC",
                     "source":         f"pdf:{filename}:{_row_hash(cell)}",
@@ -177,13 +222,133 @@ class PDFParser:
         return {
             "txn_date":       txn_date,
             "amount":         amount,
-            "merchant":       str(cell("description") or "").strip()[:100] or "Unknown",
+            "merchant":       clean_merchant_name(str(cell("description") or "")) or "Unknown",
             "payment_method": "",
             "bank_name":      bank.upper(),
             "source":         f"pdf:{filename}:{_row_hash(raw_text)}",
             "raw_text":       _redact_pii(raw_text),
             "txn_type":       txn_type,
         }
+
+    # ------------------------------------------------------------------ #
+    #  Amex credit card parser (text-based)                              #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _is_amex(text: str) -> bool:
+        lower = text.lower()
+        return "american express" in lower and "membership number" in lower
+
+    @staticmethod
+    def _amex_statement_year(text: str) -> int:
+        """Extract year from the statement date header (DD/MM/YYYY)."""
+        m = re.search(r'\b\d{2}/\d{2}/(\d{4})\b', text)
+        return int(m.group(1)) if m else datetime.now().year
+
+    def _parse_amex(self, full_text: str, filename: str) -> list[dict]:
+        year = self._amex_statement_year(full_text)
+        rows = []
+        seen = set()
+        in_installment_section = False
+
+        for line in full_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            # Track installment section — transactions here are EMI breakdowns, not new spend
+            if re.search(r'installment plan transactions', line, re.IGNORECASE):
+                in_installment_section = True
+                continue
+
+            # Skip noise lines
+            if _AMEX_SKIP_RE.search(line):
+                continue
+
+            m = _AMEX_TXN_RE.match(line)
+            if not m:
+                continue
+
+            month_str, day_str, desc, amt_str = m.groups()
+
+            # Strip trailing foreign-currency amount left in description
+            # e.g. "ANTHROPIC SAN FRANCISCO 5.90" → "ANTHROPIC SAN FRANCISCO"
+            desc = re.sub(r'\s+\d+\.\d+\s*$', '', desc).strip()
+            # Strip PDF tilde artifacts (IKEA INDIA PVT LTD~~~~~)
+            desc = re.sub(r'~+', ' ', desc).strip()
+
+            amount = parse_amount(amt_str)
+            if not amount:
+                continue
+
+            month = _AMEX_MONTH_MAP.get(month_str.lower())
+            if not month:
+                continue
+            day = int(day_str)
+
+            # Handle year-boundary statements (e.g. Dec–Jan)
+            # Statement year is the end month's year; earlier months may be prior year
+            stmt_end_month = self._amex_statement_year_month(full_text)
+            if stmt_end_month and month > stmt_end_month:
+                txn_year = year - 1
+            else:
+                txn_year = year
+
+            try:
+                txn_date = datetime(txn_year, month, day)
+            except ValueError:
+                continue
+
+            is_credit = bool(re.search(r'PAYMENT RECEIVED', desc, re.IGNORECASE))
+
+            # Skip installment section finance entries but keep insurance/principal
+            if in_installment_section and re.search(
+                r'FINANCE CHARGES|GST/IGST|INSTALLMENT PRINCIPAL', desc, re.IGNORECASE
+            ):
+                continue
+
+            merchant  = clean_merchant_name(desc) or desc.strip()[:50]
+            raw_line  = f"{month_str} {day_str} | {desc} | {amt_str}"
+            source    = f"pdf:{filename}:{_row_hash(raw_line)}"
+
+            if source in seen:
+                continue
+            seen.add(source)
+
+            rows.append({
+                "txn_date":       txn_date,
+                "amount":         amount,
+                "merchant":       merchant,
+                "payment_method": "CREDIT CARD",
+                "bank_name":      "AMEX",
+                "source":         source,
+                "raw_text":       _redact_pii(raw_line),
+                "txn_type":       "credit" if is_credit else "debit",
+            })
+
+        logger.info(f"[PDF] AMEX: extracted {len(rows)} transactions")
+        return rows
+
+    @staticmethod
+    def _amex_statement_year_month(text: str) -> int | None:
+        """Extract the statement end month number for year-boundary handling."""
+        m = re.search(r'to\s+(January|February|March|April|May|June|July|August|'
+                      r'September|October|November|December)', text, re.IGNORECASE)
+        if m:
+            return _AMEX_MONTH_MAP.get(m.group(1).lower())
+        return None
+
+    def _extract_full_text(self, pdf_bytes: bytes) -> str:
+        """Extract all text from all pages as a single string."""
+        pages = []
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                if text.strip():
+                    pages.append(text)
+        return "\n".join(pages)
+
+    # ------------------------------------------------------------------ #
 
     def _decrypt(self, path: str, password: str | None) -> bytes:
         try:

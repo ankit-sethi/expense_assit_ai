@@ -25,3 +25,9 @@ postgres_data/
 
 # Logs
 *.log
+
+# Inbox PDFs (processed by watcher — not committed)
+inbox/*.pdf
+inbox/*.password
+inbox/processed/
+inbox/failed/

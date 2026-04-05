@@ -5,14 +5,17 @@ An AI-powered personal assistant that automatically collects expense data from G
 ## 🚀 Features
 
 * Gmail ingestion of bank/transaction emails
-* PDF bank statement ingestion (HDFC CC, HDFC account, SBI, Axis)
+* PDF bank statement ingestion (HDFC CC, HDFC account, SBI, Axis, Amex Credit Card)
 * Transaction parsing & normalization pipeline (email + PDF)
 * Debit/credit split — expenses and income tracked separately
 * PostgreSQL + pgvector storage with PII redaction
 * Embedding-based semantic search
 * Natural-language → SQL analytics
-* Telegram bot — query expenses and upload PDF statements
-* CLI interface for ingestion and querying
+* Telegram bot — query expenses, upload PDFs, manage merchant mappings
+* Inbox hot-folder — drop a PDF into `inbox/` and it auto-imports
+* Power BI dashboard — 4 pre-aggregated PostgreSQL views
+* CLI interface for ingestion, querying, and data quality management
+* Merchant mapping table — user-managed canonical names and categories with priority ordering
 
 ---
 
@@ -112,6 +115,53 @@ See **INSTRUCTIONS.md** for full setup steps.
 - Added `test_data_quality.py` — reports field population rates, category/payment breakdown, and sample records
 - Fixed `gmail_auth.py` to resolve `credentials.json` and `token.pkl` relative to `app/` directory regardless of working directory
 
+### 2026-04-05
+
+**Amex Credit Card PDF Ingestion**
+- `ingestion/pdf_parser.py` now detects and parses Amex statements (plain text, no PDF tables)
+- Transaction line format: `February 13   AMAZON   Mumbai   640.00`
+- Strips trailing foreign-currency amounts and PDF tilde artifacts from descriptions
+- Year-boundary handling for Dec–Jan spanning statements
+- Skips finance charges, GST, and installment breakdown lines automatically
+- `debug_pdf_headers.py` extended to dump raw page text for PDFs with no tables
+
+**Merchant Mapping System**
+- New `merchant_mappings` PostgreSQL table (see `db/migrations/001_merchant_mappings.sql`)
+- Priority-ordered substring matching — DB mappings checked before hardcoded fallback
+- `MappingRepository` with `get_all_sorted()`, `upsert()`, `delete_by_pattern()`
+- `apply_mappings_to_db()` bulk-retroactive correction across `expenses` and `credits` tables
+- `merchant_mappings.csv` — seed file with 40+ mappings; `python admin/manage_mappings.py import`
+
+**Merchant Name Cleaning**
+- New `parsing/parse_utils.py` — shared `clean_merchant_name()` (13-step pipeline):
+  strips EMI prefix, asterisk separators, trailing ref numbers, city suffixes (30+ cities),
+  IN+CITY concatenated patterns, legal suffixes; rejects sentence fragments and Ref# lines
+- New `clean_vpa()` — maps UPI VPA handles to readable names or "UPI Transfer"
+- `transaction_parser.py` updated to use shared utilities
+
+**Data Quality CLI & Telegram Commands**
+- `admin/manage_mappings.py`: `quality`, `list`, `add`, `delete`, `apply`, `clean-existing`, `import`, `review`
+- `review` command: interactive loop showing raw_text for unknown/uncategorised rows; inline add derives pattern from raw_text automatically
+- Telegram: `/quality`, `/review`, `/listmaps`, `/applymap`, `/addmap` (guided 4-step conversation)
+
+### 2026-04-04
+
+**Inbox Hot-Folder (auto-import)**
+- New `app/watcher.py` — watchdog-based filesystem monitor watches `inbox/` for new PDFs
+- Successful imports moved to `inbox/processed/`; failures moved to `inbox/failed/`
+- Password-protected PDFs: place a `filename.pdf.password` sidecar file alongside the PDF
+- Run: `python app/watcher.py` from the project root
+
+**Power BI Dashboard**
+- New `db/views.sql` — 4 pre-aggregated PostgreSQL views: `v_monthly_spend`, `v_category_spend`, `v_top_merchants`, `v_monthly_income_vs_expense`
+- Views auto-applied on fresh Docker container start via `db/init.sql`
+- Connect Power BI Desktop to `localhost:5432 / expenses_db` using psqlODBC or Npgsql driver
+- See `INSTRUCTIONS.md` Step 13 for full dashboard setup
+
+**Documentation**
+- Added `ROADMAP.md` — prioritised feature backlog
+- Added `SYSTEM_DESIGN.md` — full architecture reference with ASCII diagram, data model, all layers
+
 ### 2026-04-02 (continued)
 
 **PDF Bank Statement Ingestion**
@@ -135,10 +185,9 @@ See **INSTRUCTIONS.md** for full setup steps.
 
 ## 📌 Future Roadmap
 
+* Recurring payment detection
 * Budget tracking & alerts
 * Auto expense categorization learning
-* Dashboard UI
-* Recurring payment detection
 
 ---
 
