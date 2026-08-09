@@ -3,7 +3,7 @@ from typing import Generic, Type, TypeVar
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from storage.db import SessionLocal, get_db
-from storage.models import Expense, Credit, MerchantMapping
+from storage.models import Expense, Credit, MerchantMapping, SmsStaging
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,141 @@ class MappingRepository:
                 db.rollback()
                 logger.error(f"[MAPPING REPO] delete failed: {e}")
                 raise
+
+
+class SmsStagingRepository:
+
+    def save(self, row: dict) -> tuple[SmsStaging, bool]:
+        """
+        Insert a parsed SMS row into sms_staging.
+        Checks for:
+          1. Duplicate staging (same source already staged) → skips silently.
+          2. Duplicate in expenses/credits (same amount+bank+date ±1 day) → status='duplicate'.
+        Returns (saved_row, was_new).
+        """
+        from datetime import timedelta
+        with get_db() as db:
+            # 1. Already staged?
+            existing = db.query(SmsStaging).filter(SmsStaging.source == row["source"]).first()
+            if existing:
+                return existing, False
+
+            # 2. Cross-channel dedup
+            status      = "pending"
+            duplicate_of = None
+            if row.get("parsed_amount") and row.get("parsed_bank") and row.get("parsed_date"):
+                date      = row["parsed_date"]
+                match_exp = db.query(Expense.source).filter(
+                    Expense.amount   == row["parsed_amount"],
+                    Expense.bank_name.ilike(row["parsed_bank"]),
+                    Expense.txn_date >= date - timedelta(days=1),
+                    Expense.txn_date <= date + timedelta(days=1),
+                ).first()
+                if not match_exp:
+                    match_exp = db.query(Credit.source).filter(
+                        Credit.amount   == row["parsed_amount"],
+                        Credit.bank_name.ilike(row["parsed_bank"]),
+                        Credit.txn_date >= date - timedelta(days=1),
+                        Credit.txn_date <= date + timedelta(days=1),
+                    ).first()
+                if match_exp:
+                    status       = "duplicate"
+                    duplicate_of = match_exp[0]
+
+            obj = SmsStaging(
+                raw_sms         = row["raw_sms"],
+                sender          = row.get("sender"),
+                received_at     = row.get("received_at"),
+                parsed_amount   = row.get("parsed_amount"),
+                parsed_merchant = row.get("parsed_merchant"),
+                parsed_date     = row.get("parsed_date"),
+                parsed_bank     = row.get("parsed_bank"),
+                txn_type        = row.get("txn_type"),
+                source          = row["source"],
+                status          = status,
+                duplicate_of    = duplicate_of,
+            )
+            db.add(obj)
+            db.commit()
+            db.refresh(obj)
+            return obj, True
+
+    def get_by_status(self, status: str, limit: int = 50, offset: int = 0) -> list:
+        with get_db() as db:
+            return (
+                db.query(SmsStaging)
+                .filter(SmsStaging.status == status)
+                .order_by(SmsStaging.received_at.desc())
+                .offset(offset).limit(limit)
+                .all()
+            )
+
+    def count_by_status(self) -> dict:
+        with get_db() as db:
+            from sqlalchemy import func as sqlfunc
+            rows = (
+                db.query(SmsStaging.status, sqlfunc.count(SmsStaging.id))
+                .group_by(SmsStaging.status)
+                .all()
+            )
+            return {status: count for status, count in rows}
+
+    def get_by_id(self, row_id: int) -> SmsStaging | None:
+        with get_db() as db:
+            return db.query(SmsStaging).filter(SmsStaging.id == row_id).first()
+
+    def approve(self, row_id: int, db_mappings: list) -> dict | None:
+        """
+        Promote a staged SMS to expenses or credits.
+        Returns the saved transaction dict or None if row not found / already processed.
+        """
+        from normalization.categorizer import Categorizer
+        from ai.embeddings import build_embedding_text, create_embedding
+        from datetime import datetime
+
+        with get_db() as db:
+            row = db.query(SmsStaging).filter(SmsStaging.id == row_id).first()
+            if not row or row.status != "pending":
+                return None
+
+            txn = {
+                "txn_date":       datetime.combine(row.parsed_date, datetime.min.time()) if row.parsed_date else row.received_at,
+                "amount":         row.parsed_amount,
+                "merchant":       row.parsed_merchant or "Unknown",
+                "payment_method": "SMS",
+                "bank_name":      row.parsed_bank or "",
+                "source":         row.source,
+                "raw_text":       row.raw_sms,
+                "currency":       "INR",
+            }
+            txn = Categorizer().normalize(txn, db_mappings=db_mappings)
+            emb_text = build_embedding_text(txn)
+            txn["embedding"] = create_embedding(emb_text)
+
+            if row.txn_type == "credit":
+                saved = Credit(**txn)
+                db.add(saved)
+                db.flush()
+                row.status    = "approved"
+                row.credit_id = saved.id
+            else:
+                saved = Expense(**txn)
+                db.add(saved)
+                db.flush()
+                row.status     = "approved"
+                row.expense_id = saved.id
+
+            db.commit()
+            return txn
+
+    def reject(self, row_id: int) -> bool:
+        with get_db() as db:
+            row = db.query(SmsStaging).filter(SmsStaging.id == row_id).first()
+            if not row or row.status != "pending":
+                return False
+            row.status = "rejected"
+            db.commit()
+            return True
 
 
 def apply_mappings_to_db(mappings: list, db) -> dict:

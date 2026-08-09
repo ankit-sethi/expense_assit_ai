@@ -26,6 +26,9 @@ postgres_data/
 # Logs
 *.log
 
+# Raw statement data — transferred by file copy, not git
+RawData/
+
 # Inbox PDFs (processed by watcher — not committed)
 inbox/*.pdf
 inbox/*.password

@@ -12,6 +12,48 @@ from parsing.parse_utils import MAX_AMOUNT, parse_amount, parse_date, clean_merc
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# OneCard (Federal Bank) credit card statement
+# Format (raw text): "DD Mon <Merchant> <Category> [TOKEN_XXX] <cashback> <amount>"
+# Repayment rows:    "DD Mon <Description> Repayments <amount>"
+# ---------------------------------------------------------------------------
+
+_ONECARD_HEADER_RE = re.compile(
+    r'Federal Bank One Credit Card Statement\s*\('
+    r'[\d\w\s]+-\s*\d{1,2}\s+(\w+)\s+(\d{4})\)',
+    re.IGNORECASE,
+)
+
+# Two trailing decimals: first is cashback (discard), last is the transaction amount
+_ONECARD_TXN_RE = re.compile(
+    r'^(\d{2}\s+[A-Za-z]{3})\s+'
+    r'(.+?)\s+'
+    r'-?[\d,]+\.\d{2}\s+'
+    r'([\d,]+\.\d{2})\s*$',
+)
+
+# Repayment row — single trailing decimal, "Repayment" keyword present
+_ONECARD_REPAYMENT_RE = re.compile(
+    r'^(\d{2}\s+[A-Za-z]{3})\s+'
+    r'(.+?Repayment\S*)\s+'
+    r'([\d,]+\.\d{2})\s*$',
+    re.IGNORECASE,
+)
+
+# Strip OneCard category labels appended after the merchant name
+_ONECARD_CATEGORY_RE = re.compile(
+    r'\s+(?:Groceries|Entertainment|Food\s*&?\s*Dining|Travel|Shopping|'
+    r'Utilities|Fuel|Apparel|Electronics|Health|Education|Other|Repayments?)'
+    r'(?:\s+TOKEN_\w+)?$',
+    re.IGNORECASE,
+)
+
+_MONTH_ABBR = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
+    'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
+    'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+}
+
 # PII patterns to redact from raw_text before storage
 _PII_PATTERNS = [
     (re.compile(r'\b[A-Z0-9]{4,6}[\*Xx]+\d{4}\b'), "[REDACTED_CARD]"),
@@ -105,11 +147,15 @@ class PDFParser:
         pdf_bytes = self._decrypt(pdf_path, password)
         filename  = Path(pdf_path).stem
 
-        # Check Amex first — it uses plain text, not PDF tables
+        # Check text-based formats first (Amex, OneCard)
         full_text = self._extract_full_text(pdf_bytes)
         if self._is_amex(full_text):
             logger.info("[PDF] Detected format: AMEX Credit Card")
             return self._parse_amex(full_text, filename)
+
+        if self._is_onecard(full_text):
+            logger.info("[PDF] Detected format: OneCard (Federal Bank)")
+            return self._parse_onecard(full_text, filename)
 
         tables = self._extract_tables(pdf_bytes)
 
@@ -337,6 +383,104 @@ class PDFParser:
         if m:
             return _AMEX_MONTH_MAP.get(m.group(1).lower())
         return None
+
+    # ------------------------------------------------------------------ #
+    #  OneCard (Federal Bank) credit card parser                         #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _is_onecard(text: str) -> bool:
+        return "federal bank one credit card" in text.lower()
+
+    @staticmethod
+    def _onecard_statement_end(text: str) -> tuple[int, int]:
+        """Return (end_month_num, end_year) from the statement header."""
+        m = _ONECARD_HEADER_RE.search(text)
+        if m:
+            month_num = _MONTH_ABBR.get(m.group(1)[:3].lower(), 0)
+            return month_num, int(m.group(2))
+        return datetime.now().month, datetime.now().year
+
+    @staticmethod
+    def _onecard_date(date_str: str, end_month: int, end_year: int) -> datetime | None:
+        parts = date_str.strip().split()
+        if len(parts) != 2:
+            return None
+        month_num = _MONTH_ABBR.get(parts[1][:3].lower())
+        if not month_num:
+            return None
+        year = end_year - 1 if month_num > end_month else end_year
+        try:
+            return datetime(year, month_num, int(parts[0]))
+        except ValueError:
+            return None
+
+    def _parse_onecard(self, full_text: str, filename: str) -> list[dict]:
+        end_month, end_year = self._onecard_statement_end(full_text)
+        rows = []
+        seen = set()
+
+        for line in full_text.splitlines():
+            line = line.strip()
+            if not line or not re.match(r'^\d{2}\s+[A-Za-z]{3}\s', line):
+                continue
+
+            # Repayment row (single trailing number)
+            m = _ONECARD_REPAYMENT_RE.match(line)
+            if m:
+                date_str, _, amt_str = m.group(1), m.group(2), m.group(3)
+                amount = parse_amount(amt_str)
+                txn_date = self._onecard_date(date_str, end_month, end_year)
+                if not amount or not txn_date:
+                    continue
+                source = f"pdf:{filename}:{_row_hash(line)}"
+                if source in seen:
+                    continue
+                seen.add(source)
+                rows.append({
+                    "txn_date":       txn_date,
+                    "amount":         amount,
+                    "merchant":       "OneCard Payment",
+                    "payment_method": "CREDIT CARD",
+                    "bank_name":      "ONECARD",
+                    "source":         source,
+                    "raw_text":       _redact_pii(line),
+                    "txn_type":       "credit",
+                })
+                continue
+
+            # Regular debit transaction (two trailing numbers)
+            m = _ONECARD_TXN_RE.match(line)
+            if m:
+                date_str, raw_desc, amt_str = m.group(1), m.group(2), m.group(3)
+                amount = parse_amount(amt_str)
+                txn_date = self._onecard_date(date_str, end_month, end_year)
+                if not amount or not txn_date:
+                    continue
+
+                # Strip appended category / TOKEN label before cleaning
+                desc = _ONECARD_CATEGORY_RE.sub('', raw_desc).strip()
+                # Also strip bare TOKEN_* if still present
+                desc = re.sub(r'\s+TOKEN_\w+$', '', desc, flags=re.IGNORECASE).strip()
+                merchant = clean_merchant_name(desc) or desc[:50]
+
+                source = f"pdf:{filename}:{_row_hash(line)}"
+                if source in seen:
+                    continue
+                seen.add(source)
+                rows.append({
+                    "txn_date":       txn_date,
+                    "amount":         amount,
+                    "merchant":       merchant,
+                    "payment_method": "CREDIT CARD",
+                    "bank_name":      "ONECARD",
+                    "source":         source,
+                    "raw_text":       _redact_pii(line),
+                    "txn_type":       "debit",
+                })
+
+        logger.info(f"[PDF] ONECARD: extracted {len(rows)} transactions")
+        return rows
 
     def _extract_full_text(self, pdf_bytes: bytes) -> str:
         """Extract all text from all pages as a single string."""

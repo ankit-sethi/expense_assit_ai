@@ -22,7 +22,7 @@
 
 ## Overview
 
-A personal finance AI system that automatically collects bank transaction data from two sources — Gmail transaction alerts and PDF bank statements — parses and normalises it, stores it in a vector-enabled PostgreSQL database, and exposes intelligent querying via natural language through three interfaces: a FastAPI REST server, a Telegram bot, and an interactive CLI. A background inbox watcher auto-imports PDFs dropped into a local folder. A Power BI Desktop dashboard visualises the data.
+A personal finance AI system that automatically collects bank transaction data from two sources — Gmail transaction alerts and PDF bank statements — parses and normalises it, stores it in a vector-enabled PostgreSQL database, and exposes intelligent querying via natural language through three interfaces: a FastAPI REST server, a Telegram bot, and an interactive CLI. A background inbox watcher auto-imports PDFs dropped into a local folder. Data is visualised via a Power BI Desktop dashboard and a built-in browser dashboard (Chart.js, served at `GET /dashboard`).
 
 ---
 
@@ -92,10 +92,9 @@ A personal finance AI system that automatically collects bank transaction data f
 ┌─────────────────────┐   ┌────────────────────────────────┐
 │    QUERY LAYER      │   │        DASHBOARD               │
 │  query_router.py    │   │  db/views.sql (4 views)        │
-│  ├─ recurring kws   │   │  Power BI Desktop              │
-│  ├─ numeric kws     │   │  Direct PostgreSQL connection  │
-│  │  → sql_agent.py  │   └────────────────────────────────┘
-│  │  → sql_validator │
+│  ├─ numeric kws     │   │  Power BI Desktop (ODBC)       │
+│  │  → sql_agent.py  │   │  Chart.js via GET /dashboard   │
+│  │  → sql_validator │   └────────────────────────────────┘
 │  └─ other           │
 │     → semantic_     │
 │       search.py     │
@@ -105,10 +104,10 @@ A personal finance AI system that automatically collects bank transaction data f
    ▼                ▼
 FastAPI          Telegram
 REST API         Bot
-/query           /start
-/recurring       /recurring
-                 PDF upload
-                 Text queries
+/query           /start, /quality, /review
+/dashboard       /listmaps, /applymap, /addmap
+/dashboard/data  /sms_stats, /sms_review
+POST /ingest     PDF upload, Text queries
 ```
 
 ---
@@ -210,6 +209,8 @@ Identical schema to `expenses`. Populated by PDF pipeline when `txn_type = "cred
 - HDFC Bank Account — standard multi-column table
 - Axis Bank — standard multi-column table
 - SBI — standard multi-column table
+- Amex Credit Card — plain-text (no tables); regex line parser with year-boundary handling
+- OneCard (Federal Bank) — plain-text; regex parser with repayment detection and category-label stripping
 
 **Bank detection:**
 1. Check first table header cell for HDFC CC keywords (`date & time`, `transaction`, `description`, `amount`)
@@ -367,21 +368,19 @@ Also requires query to start with `SELECT`.
 
 ### Query Router (`ai/query_router.py`)
 
-Three-branch routing on lowercased query:
+Two-branch routing on lowercased query (used by the CLI only — see Interfaces):
 
 ```
-1. Recurring keywords → recurring_detector.detect_recurring()
-   Keywords: "recurring", "subscription", "subscriptions",
-             "regular payments", "every month", "repeat", "repeating"
-
-2. Numeric keywords → sql_agent.ask()
+1. Numeric keywords → sql_agent.ask()
    Keywords: "how much", "total", "sum", "spent", "count", "average",
              "monthly", "last month", "this year", "more than", "less than",
              "above", "below", "highest", "lowest", "show me", "list", "find",
              "transactions", "yesterday", "today", "last week", "this month", ...
 
-3. Everything else → semantic_search.search_similar()
+2. Everything else → semantic_search.search_similar()
 ```
+
+Note: recurring payment detection is planned but not yet implemented (see ROADMAP.md).
 
 ---
 
@@ -393,8 +392,11 @@ Run: `uvicorn app.main_nlp_interface:app --host 0.0.0.0 --port 8000`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/query?q=...` | GET | Natural language query — routes via query_router |
-| `/recurring` | GET | Returns list of detected recurring payments |
+| `/query?q=...` | GET | Natural language query — SQL agent directly (validator applied; no semantic-search branch) |
+| `/dashboard` | GET | Browser Chart.js dashboard (`templates/dashboard.html`) |
+| `/dashboard/data` | GET | JSON payload from the 4 dashboard views |
+| `/ingest` | POST | Scan `inbox/` and ingest all PDFs; per-file status, error stage, and resolution hints |
+| `/upload` | POST | Multipart PDF upload (browser); optional `password` form field for protected PDFs; same per-file report |
 
 **Response format `/query`:**
 ```json
@@ -411,7 +413,13 @@ Run: `python app/telegram_bot.py`
 | Trigger | Handler | Description |
 |---------|---------|-------------|
 | `/start` | `start()` | Help message listing commands and examples |
-| `/recurring` | `handle_recurring()` | Formatted list of recurring payments |
+| `/quality` | `quality_command()` | Data quality report |
+| `/review` | `review_command()` | Review unknown/uncategorised rows |
+| `/listmaps` | `listmaps_command()` | List merchant mappings |
+| `/applymap` | `applymap_command()` | Bulk-apply mappings to existing rows |
+| `/addmap` | conversation | Guided 4-step add-mapping flow |
+| `/sms_stats` | `sms_stats_command()` | Staged SMS row counts by status |
+| `/sms_review` | `sms_review_command()` | Paginated inline ✅/❌ SMS review |
 | Text message | `handle_message()` | Heuristic query parser → sum with filters |
 | PDF document | `handle_pdf()` | Download → `run_pdf_pipeline()` → summary reply |
 
@@ -432,8 +440,7 @@ Run: `python app/telegram_bot.py`
 ```
 python app/test_query_CLI.py
 > How much did I spend on Swiggy?   → SQL agent
-> Show me payments similar to Uber   → semantic search
-> Do I have recurring subscriptions? → recurring detector
+> Show payments similar to Uber      → semantic search
 > exit
 ```
 
@@ -569,7 +576,7 @@ TELEGRAM_BOT_TOKEN=...
 | Categorizer | Static keyword dict; new merchants default to "Other" until manually added |
 | SQL agent | Schema prompt only includes `expenses` table — `credits` not queryable via NL |
 | Telegram text queries | Heuristic parser (not AI-powered); limited query understanding |
-| PDF formats | Only HDFC CC, HDFC Account, Axis, SBI supported |
+| PDF formats | Only HDFC CC, HDFC Account, Axis, SBI, Amex, OneCard supported |
 | Embeddings | Not generated for PDF rows where `raw_text` is sparse — semantic search quality varies |
 | Power BI refresh | Manual — no scheduled refresh or real-time push |
 

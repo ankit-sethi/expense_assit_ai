@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Numeric, TIMESTAMP, Text, Integer
+from sqlalchemy import Column, String, Numeric, TIMESTAMP, Text, Integer, Date, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func, text
 import uuid
@@ -44,6 +44,31 @@ class MerchantMapping(Base):
     priority     = Column(Integer, nullable=False, server_default=text("0"))
     created_at   = Column(TIMESTAMP, server_default=func.now())
     updated_at   = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
+class SmsStaging(Base):
+
+    __tablename__ = "sms_staging"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    raw_sms         = Column(Text, nullable=False)
+    sender          = Column(Text)
+    received_at     = Column(TIMESTAMP)
+
+    parsed_amount   = Column(Numeric(12, 2))
+    parsed_merchant = Column(Text)
+    parsed_date     = Column(Date)
+    parsed_bank     = Column(Text)
+    txn_type        = Column(Text)
+
+    source          = Column(Text, unique=True)
+    status          = Column(Text, server_default=text("'pending'"))
+    duplicate_of    = Column(Text)
+
+    expense_id      = Column(UUID(as_uuid=True), ForeignKey("expenses.id"), nullable=True)
+    credit_id       = Column(UUID(as_uuid=True), ForeignKey("credits.id"),  nullable=True)
+
+    created_at      = Column(TIMESTAMP, server_default=func.now())
 
 
 class Credit(Base):

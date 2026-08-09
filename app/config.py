@@ -17,5 +17,6 @@ _db_host = _resolve_db_host(os.getenv('DB_HOST', 'localhost'))
 
 DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{_db_host}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
 
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_KEY     = os.getenv("OPENAI_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+SMS_API_KEY    = os.getenv("SMS_API_KEY", "")

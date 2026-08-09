@@ -15,12 +15,8 @@ Refresh Power BI and confirm all 4 views load without errors.
 
 ---
 
-### V2. Test Amex PDF Parser End-to-End
-```powershell
-cd expense_assit_ai/app
-python -m pipelines.pdf_pipeline "C:\Users\91915\Downloads\12_Feb_-_11_Mar.pdf"
-```
-Expected: `[PDF] Detected format: AMEX Credit Card`, transaction count in log, rows in DB with `bank_name='AMEX'`.
+### V2. Test Amex PDF Parser End-to-End — Done
+Verified: `12_Feb_-_11_Mar.pdf` processed successfully (moved to `inbox/processed/`).
 
 ---
 
@@ -153,7 +149,7 @@ Parse bank transaction SMS messages as an alternative ingestion source.
 | # | Item | Status |
 |---|------|--------|
 | V1 | Apply Power BI views fix | Done |
-| V2 | Test Amex PDF parser | Pending |
+| V2 | Test Amex PDF parser | Done |
 | V3 | Import & apply merchant mappings | Pending |
 | V4 | Review unknown rows | Pending |
 | V5 | Verify inbox watcher | Done |
@@ -162,10 +158,17 @@ Parse bank transaction SMS messages as an alternative ingestion source.
 | 3 | Monthly Summary Report | Pending |
 | 4 | Auto Categorization Learning | Pending |
 | 5 | Email Ingestion Scheduling | Pending |
-| 6 | SMS Ingestion | Pending |
-| — | Dashboard UI (Power BI) | Done |
+| 6 | SMS Ingestion — iOS (backend) | In Progress |
+| 6a | SMS Ingestion — Cloudflare Tunnel + webhook endpoint | Pending |
+| 6b | SMS Ingestion — iOS Shortcut configuration | Pending |
+| 6c | SMS Ingestion — Android | Paused |
+| — | Dashboard UI (browser-based Chart.js via FastAPI `/dashboard`) | Done |
 | — | Inbox Hot-Folder Watcher | Done |
 | — | Amex Credit Card PDF Parser | Done |
+| — | OneCard (Federal Bank) PDF Parser | Done |
+| — | `POST /ingest` API endpoint (batch inbox ingestion with per-file errors) | Done |
+| — | `POST /upload` + dashboard upload button (browser PDF upload) | Done |
 | — | Merchant Mapping Table & CLI | Done |
 | — | Data Quality Review Commands | Done |
 | — | Merchant Name Cleaning Pipeline | Done |
+| — | SMS staging table, parser, CLI, Telegram commands | Done (2026-04-11) |

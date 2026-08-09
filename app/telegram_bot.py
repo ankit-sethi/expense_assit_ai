@@ -1,14 +1,14 @@
 import os
 import logging
 import tempfile
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
-    filters, ContextTypes, ConversationHandler,
+    filters, ContextTypes, ConversationHandler, CallbackQueryHandler,
 )
 from storage.db import SessionLocal
 from storage.models import Expense, Credit
-from storage.repository import MappingRepository, apply_mappings_to_db
+from storage.repository import MappingRepository, SmsStagingRepository, apply_mappings_to_db
 from sqlalchemy import func
 from config import TELEGRAM_TOKEN
 from datetime import datetime, timedelta
@@ -148,12 +148,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- upi today\n\n"
         "You can also send a bank statement PDF to import transactions.\n"
         "If password-protected, add the password as the file caption.\n\n"
-        "Data quality commands:\n"
+        "Data quality:\n"
         "/quality — data quality report\n"
         "/review — view raw text for unknown/uncategorised rows\n"
         "/listmaps — show merchant mappings\n"
         "/addmap — add/update a merchant mapping\n"
-        "/applymap — apply mappings to all existing transactions"
+        "/applymap — apply mappings to all existing transactions\n\n"
+        "SMS staging:\n"
+        "/sms_stats — count of staged SMS rows by status\n"
+        "/sms_review — review pending SMS rows with approve/reject buttons"
     )
 
 
@@ -435,6 +438,116 @@ async def addmap_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# ---------------------------------------------------------------------------
+# /sms_stats
+# ---------------------------------------------------------------------------
+
+async def sms_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    counts = SmsStagingRepository().count_by_status()
+    statuses = ("pending", "approved", "rejected", "duplicate")
+    lines = ["<b>SMS Staging — Status Counts</b>", ""]
+    for s in statuses:
+        lines.append(f"  {s:<12}: {counts.get(s, 0)}")
+    lines.append(f"  {'total':<12}: {sum(counts.values())}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+# ---------------------------------------------------------------------------
+# /sms_review  — paginated inline approve/reject
+# ---------------------------------------------------------------------------
+
+_SMS_PAGE_SIZE = 3
+
+
+def _sms_review_keyboard(row_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve", callback_data=f"sms_approve:{row_id}"),
+        InlineKeyboardButton("❌ Reject",  callback_data=f"sms_reject:{row_id}"),
+    ]])
+
+
+def _format_sms_row(idx: int, total: int, row) -> str:
+    raw_snippet = (row.raw_sms or "").strip().replace("<", "&lt;").replace(">", "&gt;")
+    if len(raw_snippet) > 300:
+        raw_snippet = raw_snippet[:300] + "…"
+    dup_note = f"\n  ⚠ duplicate of: <code>{row.duplicate_of}</code>" if row.duplicate_of else ""
+    return (
+        f"<b>SMS [{idx}/{total}]</b>  id={row.id}\n"
+        f"  received : {str(row.received_at)[:16]}\n"
+        f"  sender   : {row.sender or '—'}\n"
+        f"  bank     : {row.parsed_bank or '—'}\n"
+        f"  merchant : {row.parsed_merchant or '—'}\n"
+        f"  amount   : {'₹' + str(row.parsed_amount) if row.parsed_amount else '—'}\n"
+        f"  type     : {row.txn_type or '—'}{dup_note}\n\n"
+        f"<pre>{raw_snippet}</pre>"
+    )
+
+
+async def sms_review_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        page = int(context.args[0]) if context.args else 1
+        page = max(1, page)
+    except (ValueError, IndexError):
+        page = 1
+
+    offset = (page - 1) * _SMS_PAGE_SIZE
+    repo   = SmsStagingRepository()
+    rows   = repo.get_by_status("pending", limit=_SMS_PAGE_SIZE, offset=offset)
+    total  = repo.count_by_status().get("pending", 0)
+
+    if total == 0:
+        await update.message.reply_text("No pending SMS rows. Use /sms_stats to see all counts.")
+        return
+
+    total_pages = (total + _SMS_PAGE_SIZE - 1) // _SMS_PAGE_SIZE
+
+    if not rows:
+        await update.message.reply_text(f"Page {page} out of range. Total pages: {total_pages}")
+        return
+
+    for i, row in enumerate(rows, start=offset + 1):
+        msg = _format_sms_row(i, total, row)
+        await update.message.reply_text(
+            msg,
+            parse_mode="HTML",
+            reply_markup=_sms_review_keyboard(row.id),
+        )
+
+    if page < total_pages:
+        await update.message.reply_text(f"Next page: /sms_review {page + 1}")
+
+
+async def sms_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query    = update.callback_query
+    await query.answer()
+
+    action, row_id_str = query.data.split(":", 1)
+    row_id  = int(row_id_str)
+    repo    = SmsStagingRepository()
+
+    if action == "sms_approve":
+        mappings = MappingRepository().get_all_sorted()
+        result   = repo.approve(row_id, mappings)
+        if result:
+            text = (
+                f"✅ Approved id={row_id}\n"
+                f"  {result.get('merchant')}  ₹{result.get('amount')}\n"
+                f"  {result.get('category')} / {result.get('sub_category', '—')}"
+            )
+        else:
+            text = f"⚠ Could not approve id={row_id} — already processed or missing required fields."
+
+    elif action == "sms_reject":
+        ok   = repo.reject(row_id)
+        text = f"❌ Rejected id={row_id}." if ok else f"⚠ Could not reject id={row_id} — not found or not pending."
+
+    else:
+        text = "Unknown action."
+
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text(text)
+
+
 
 def run_bot():
 
@@ -454,11 +567,14 @@ def run_bot():
     )
     app.add_handler(addmap_conv)
 
-    app.add_handler(CommandHandler("start",     start))
-    app.add_handler(CommandHandler("quality",   quality_command))
-    app.add_handler(CommandHandler("review",    review_command))
-    app.add_handler(CommandHandler("listmaps",  listmaps_command))
-    app.add_handler(CommandHandler("applymap",  applymap_command))
+    app.add_handler(CommandHandler("start",      start))
+    app.add_handler(CommandHandler("quality",    quality_command))
+    app.add_handler(CommandHandler("review",     review_command))
+    app.add_handler(CommandHandler("listmaps",   listmaps_command))
+    app.add_handler(CommandHandler("applymap",   applymap_command))
+    app.add_handler(CommandHandler("sms_stats",  sms_stats_command))
+    app.add_handler(CommandHandler("sms_review", sms_review_command))
+    app.add_handler(CallbackQueryHandler(sms_callback, pattern=r"^sms_(approve|reject):"))
     app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
 

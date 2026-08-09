@@ -5,15 +5,17 @@ An AI-powered personal assistant that automatically collects expense data from G
 ## 🚀 Features
 
 * Gmail ingestion of bank/transaction emails
-* PDF bank statement ingestion (HDFC CC, HDFC account, SBI, Axis, Amex Credit Card)
+* PDF bank statement ingestion (HDFC CC, HDFC account, SBI, Axis, Amex Credit Card, OneCard)
 * Transaction parsing & normalization pipeline (email + PDF)
 * Debit/credit split — expenses and income tracked separately
 * PostgreSQL + pgvector storage with PII redaction
 * Embedding-based semantic search
 * Natural-language → SQL analytics
-* Telegram bot — query expenses, upload PDFs, manage merchant mappings
+* Telegram bot — query expenses, upload PDFs, manage merchant mappings, review SMS staging
+* SMS ingestion — iOS Shortcuts → Cloudflare Tunnel → staging table with review workflow (Android planned)
 * Inbox hot-folder — drop a PDF into `inbox/` and it auto-imports
 * Power BI dashboard — 4 pre-aggregated PostgreSQL views
+* Browser dashboard — Chart.js served at `GET /dashboard` (FastAPI), with in-page PDF upload and inbox ingestion buttons
 * CLI interface for ingestion, querying, and data quality management
 * Merchant mapping table — user-managed canonical names and categories with priority ordering
 
@@ -114,6 +116,18 @@ See **INSTRUCTIONS.md** for full setup steps.
 - Added `admin/clean_bad_rows.py` — interactive script to identify and delete malformed expense records
 - Added `test_data_quality.py` — reports field population rates, category/payment breakdown, and sample records
 - Fixed `gmail_auth.py` to resolve `credentials.json` and `token.pkl` relative to `app/` directory regardless of working directory
+
+### 2026-04-11
+
+**SMS Ingestion — iOS (partial, pending Cloudflare tunnel)**
+- New `sms_staging` PostgreSQL table (`db/migrations/002_sms_staging.sql`) — holds incoming SMS before review; `source` column prevents double-staging
+- New `ingestion/sms_parser.py` — reuses `TransactionParser` pipeline; maps sender IDs (AXISBK-S, AMEXIN-S, HDFCBK-T, HDFCBK-S, CBSSBI-S) to bank names; stable SHA256 dedup key
+- Cross-channel dedup: amount + bank + date ±1 day checked against `expenses`/`credits` on save; marked `duplicate` if matched
+- `SmsStagingRepository` — `save()`, `get_by_status()`, `count_by_status()`, `approve()`, `reject()`; `approve()` normalises, embeds, and promotes to main tables
+- `admin/manage_sms.py` — CLI: `stats`, `review` (interactive approve/reject loop), `list`, `approve <id>`, `reject <id>`
+- Telegram: `/sms_stats` (counts by status), `/sms_review` (paginated rows with inline ✅/❌ buttons)
+- `app/config.py` + `.env.example` — `SMS_API_KEY` added
+- Pending: Cloudflare Tunnel setup + `POST /sms/ingest` FastAPI endpoint + iOS Shortcut configuration
 
 ### 2026-04-05
 

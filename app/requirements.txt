@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+jinja2
 psycopg2-binary
 sqlalchemy
 python-dotenv
@@ -14,3 +15,4 @@ pikepdf
 pgvector
 python-telegram-bot
 watchdog
+python-multipart
